@@ -1,0 +1,548 @@
+/**
+ *
+ * Design language: Dark glass palette.
+ * Aesthetic: Editorial minimal — like a pro tool, not a demo.
+ *
+ * Key decisions:
+ *   - backdrop-filter for glass effect (requires compositor)
+ *   - CSS custom properties for theme extensibility
+ *   - Smooth enter/exit via opacity + translateY
+ *   - No layout shift during streaming (pre-sized output area)
+ *   - Reduced motion respected
+ */
+
+/* ─── Reset ──────────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* ─── Design tokens ──────────────────────────────────────────────────────── */
+:root {
+  /* Palette */
+  --bg-base: rgba(14, 14, 18, 0.88);
+  --bg-surface: rgba(22, 22, 28, 0.82);
+  --bg-input: rgba(255, 255, 255, 0.04);
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  --bg-active: rgba(255, 255, 255, 0.09);
+
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-focus: rgba(255, 255, 255, 0.2);
+
+  /* Accent — amber-gold for warmth without typical purple AI tropes */
+  --accent: #e8c96d;
+  --accent-dim: rgba(232, 201, 109, 0.18);
+  --accent-glow: rgba(232, 201, 109, 0.08);
+
+  /* Text */
+  --text-primary: rgba(240, 238, 230, 0.95);
+  --text-secondary: rgba(240, 238, 230, 0.5);
+  --text-muted: rgba(240, 238, 230, 0.3);
+  --text-accent: #e8c96d;
+
+  /* Functional */
+  --error: rgba(255, 100, 80, 0.9);
+  --success: rgba(100, 220, 140, 0.9);
+
+  /* Spacing */
+  --r-card: 14px;
+  --r-inner: 8px;
+  --r-pill: 20px;
+  --pad: 16px;
+
+  /* Typography */
+  --font-sans: "Geist Mono", "JetBrains Mono", "SF Mono", monospace;
+  --font-serif: "Instrument Serif", Georgia, serif;
+  --font-size-sm: 11px;
+  --font-size-base: 13px;
+  --font-size-lg: 15px;
+  --font-size-xl: 20px;
+
+  /* Animation */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 100ms;
+  --dur-med: 180ms;
+  --dur-show: 220ms;
+}
+
+/* ─── Base ───────────────────────────────────────────────────────────────── */
+html,
+body {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  color: var(--text-primary);
+  padding: 10px; /* Space for shadow + rounded corners to render */
+}
+
+/* ─── App container ──────────────────────────────────────────────────────── */
+.app {
+  background: var(--bg-base);
+  backdrop-filter: blur(32px) saturate(160%);
+  -webkit-backdrop-filter: blur(32px) saturate(160%);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-card);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset,
+    0 32px 64px -12px rgba(0, 0, 0, 0.7),
+    0 4px 24px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+  height: calc(100vh - 20px);
+  position: relative;
+
+  /* Entrance animation */
+  transition:
+    opacity var(--dur-show) var(--ease-out),
+    transform var(--dur-show) var(--ease-out);
+}
+
+/* Entrance: fade + lift from below */
+.app.hidden {
+  opacity: 0;
+  transform: translateY(6px) scale(0.99);
+  pointer-events: none;
+}
+
+.app.visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: all;
+}
+
+/* Exit animation */
+.app.exiting {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.99);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app,
+  .app.hidden,
+  .app.visible,
+  .app.exiting {
+    transition: none;
+    transform: none;
+  }
+}
+
+/* ─── Header ─────────────────────────────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px var(--pad) 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  -webkit-app-region: drag; /* Allow window drag from header */
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+.brand-mark {
+  color: var(--accent);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.brand-name {
+  font-family: var(--font-serif);
+  font-size: var(--font-size-lg);
+  font-style: italic;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+
+/* ─── Mode tabs ──────────────────────────────────────────────────────────── */
+.mode-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-app-region: no-drag;
+}
+
+.mode-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.mode-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: var(--r-pill);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-in-out),
+    background var(--dur-fast) var(--ease-in-out),
+    border-color var(--dur-fast) var(--ease-in-out);
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+}
+
+.mode-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.mode-tab.active {
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-color: rgba(232, 201, 109, 0.25);
+}
+
+.mode-tab-icon {
+  font-style: normal;
+  line-height: 1;
+}
+
+/* ─── Close button ───────────────────────────────────────────────────────── */
+.close-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition:
+    color var(--dur-fast),
+    background var(--dur-fast),
+    border-color var(--dur-fast);
+  -webkit-app-region: no-drag;
+}
+
+.close-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  border-color: var(--border-subtle);
+}
+
+/* ─── Input section ──────────────────────────────────────────────────────── */
+.input-section {
+  padding: var(--pad) var(--pad) 8px;
+  flex-shrink: 0;
+}
+
+.text-area {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-inner);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-base);
+  line-height: 1.6;
+  padding: 10px 12px;
+  resize: none;
+  outline: none;
+  transition:
+    border-color var(--dur-med) var(--ease-in-out),
+    background var(--dur-med) var(--ease-in-out),
+    box-shadow var(--dur-med) var(--ease-in-out);
+}
+
+.text-area::placeholder {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.text-area:focus {
+  border-color: var(--border-focus);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.input-text {
+  min-height: 80px;
+  max-height: 140px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-subtle) transparent;
+}
+
+/* ─── Action bar ─────────────────────────────────────────────────────────── */
+.action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px var(--pad);
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.hint-pills {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hint {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+/* ─── Generate button ────────────────────────────────────────────────────── */
+.generate-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  border: 1px solid rgba(232, 201, 109, 0.35);
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  transition:
+    background var(--dur-fast),
+    border-color var(--dur-fast),
+    box-shadow var(--dur-fast),
+    transform var(--dur-fast);
+}
+
+.generate-btn:hover {
+  background: rgba(232, 201, 109, 0.25);
+  border-color: rgba(232, 201, 109, 0.55);
+  box-shadow: 0 0 16px var(--accent-glow);
+}
+
+.generate-btn:active {
+  transform: scale(0.98);
+}
+
+.generate-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.generate-btn.loading {
+  opacity: 0.8;
+  cursor: default;
+}
+
+/* Spinner animation */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.icon-spinner {
+  animation: spin 0.9s linear infinite;
+}
+
+/* ─── Output section ─────────────────────────────────────────────────────── */
+.output-section {
+  border-top: 1px solid var(--border-subtle);
+  padding: var(--pad);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  overflow: hidden;
+  animation: slideIn var(--dur-med) var(--ease-out);
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.output-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.output-label {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.output-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition:
+    color var(--dur-fast),
+    background var(--dur-fast),
+    border-color var(--dur-fast);
+}
+
+.action-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  border-color: var(--border-focus);
+}
+
+.action-btn.success {
+  color: var(--success);
+  border-color: rgba(100, 220, 140, 0.3);
+  background: rgba(100, 220, 140, 0.08);
+}
+
+/* Replace button — slightly highlighted */
+#replaceBtn {
+  color: var(--accent);
+  border-color: rgba(232, 201, 109, 0.25);
+  background: var(--accent-dim);
+}
+
+#replaceBtn:hover {
+  background: rgba(232, 201, 109, 0.22);
+  border-color: rgba(232, 201, 109, 0.5);
+}
+
+.output-text {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 60px;
+  max-height: 160px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.65;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-subtle) transparent;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-inner);
+  padding: 10px 12px;
+  user-select: text;
+}
+
+/* Streaming cursor blink */
+.output-text.streaming::after {
+  content: "▋";
+  color: var(--accent);
+  animation: blink 0.8s step-end infinite;
+  margin-left: 1px;
+}
+
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+/* ─── Error toast ────────────────────────────────────────────────────────── */
+.error-toast {
+  margin: 0 var(--pad) var(--pad);
+  padding: 8px 12px;
+  border-radius: var(--r-inner);
+  border: 1px solid rgba(255, 100, 80, 0.25);
+  background: rgba(255, 100, 80, 0.08);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: slideIn var(--dur-med) var(--ease-out);
+  flex-shrink: 0;
+}
+
+.error-icon {
+  font-size: 13px;
+  color: var(--error);
+  flex-shrink: 0;
+}
+
+.error-msg {
+  font-size: var(--font-size-sm);
+  color: rgba(255, 150, 130, 0.9);
+  line-height: 1.4;
+}
+
+/* ─── Scrollbar styling ──────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* ─── Focus visible (accessibility) ─────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button:focus:not(:focus-visible) {
+  outline: none;
+}
